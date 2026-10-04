@@ -1,9 +1,17 @@
-const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, REST, Routes, PermissionsBitField } = require('discord.js');
+const { 
+  Client, 
+  GatewayIntentBits, 
+  AuditLogEvent, 
+  EmbedBuilder, 
+  REST, 
+  Routes, 
+  PermissionsBitField 
+} = require('discord.js');
 
-// === ENVIRONMENT VARIABLES — SAFE METHOD ===
+// === ENVIRONMENT VARIABLES ===
 const env = process.env;
 const botToken = env.token;
-const botOwnerId = 1497456958783881296
+const botOwnerId = env.ownerId;
 const logChId = env.logChannelId || '';
 
 const client = new Client({
@@ -16,7 +24,7 @@ const client = new Client({
 const CONFIG = {
   enabled: true,
   instantBan: true,
-  whitelist: [1497456958783881296],
+  whitelist: [botOwnerId],
   punishRole: true,
   punishChannel: true,
   punishWebhook: true,
@@ -26,7 +34,8 @@ const CONFIG = {
   punishEmoji: true,
   punishSticker: true,
   thresholds: {
-    bans: 2, kicks: 2, channels: 2, roles: 2, webhooks: 1, bots: 1, emojis: 3, stickers: 3
+    bans: 2, kicks: 2, channels: 2, roles: 2, 
+    webhooks: 1, bots: 1, emojis: 3, stickers: 3
   },
   timeWindow: 15000,
   ignoreAdmins: true,
@@ -132,6 +141,7 @@ function trackAction(userId, type) {
   tracker.set(userId, actions);
   return actions.filter(a => a.type === type).length >= CONFIG.thresholds[type];
 }
+
 async function punish(guild, executorId, reason) {
   if (!CONFIG.enabled || isWhitelisted(executorId)) return false;
   const member = await guild.members.fetch(executorId).catch(() => null);
@@ -254,7 +264,7 @@ client.on('interactionCreate', async interaction => {
       }
       const data = CONFIG.premium.premiumGuilds.get(guild.id);
       data.pfpUrl = attachment.url;
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor('Green').setTitle('🖼️ Avatar Saved!').setDescription('✅ Custom server avatar set — global bot pfp unchanged').setImage(attachment.url)] });
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor('Green').setTitle('🖼️ Avatar Saved!').setDescription('✅ Custom server avatar set').setImage(attachment.url)] });
     }
 
     if (action === 'removeavatar') {
@@ -347,7 +357,7 @@ Log Channel: ${logChId ? '✅ Set' : '⚠️ Not configured'}
   }
 
   if (commandName === 'protect') {
-    await interaction.reply(`🛡️ **PROTECTION: ${CONFIG.enabled ? '✅ ON' : '❌ OFF'}** | ⚡ **INSTANT BAN: ${CONFIG.instantBan ? '✅ ON' : '❌ OFF'}** | 💎 **PREMIUM: ${isPremiumGuild(guild.id) ? '✅ ACTIVE' : 'Free'}** | 📋 **LOGS: ${logChId ? '✅ ON' : '⚠️ OFF'}`);
+    await interaction.reply(`🛡️ **PROTECTION: ${CONFIG.enabled ? '✅ ON' : '❌ OFF'}** | ⚡ **INSTANT BAN: ${CONFIG.instantBan ? '✅ ON' : '❌ OFF'}** | 💎 **PREMIUM: ${isPremiumGuild(guild.id) ? '✅ ACTIVE' : 'Free'}** | 📋 **LOGS: ${logChId ? '✅ ON' : '⚠️ OFF'}**`);
   }
 });
 
@@ -370,4 +380,5 @@ client.on('guildAuditLogEntryCreate', async entry => {
   }
 });
 
+client.login(botToken);
 client.login(botToken);
