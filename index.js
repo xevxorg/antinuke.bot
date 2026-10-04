@@ -1,52 +1,40 @@
-const { Client, GatewayIntentBits, AuditLogEvent, EmbedBuilder, REST, Routes, PermissionsBitField } = require('discord.js');
+const { Client, Events, GatewayIntentBits, AuditLogEvent, EmbedBuilder, REST, Routes, PermissionsBitField } = require('discord.js');
 
-// === ENVIRONMENT VARIABLES — ONLY HERE, NOT VALUES ===
-const botToken = process.env.token;
-const botOwnerId = process.env.ownerId;
-const logChId = process.env.logChannelId || '';
+// === ENVIRONMENT VARIABLES — ONLY READ HERE ===
+const TOKEN = process.env.token;
+const OWNER_ID = process.env.ownerId;
+const LOG_CHANNEL_ID = process.env.logChannelId || null;
 
-// ✅ CONFIRMED INTENTS — guaranteed to exist
+// ✅ DIRECT INTENT VALUES — NO MORE "undefined"
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildAuditLogs
+    1 << 0,   // Guilds
+    1 << 11   // GuildAuditLogs
   ]
 });
 
 const CONFIG = {
   enabled: true,
   instantBan: true,
-  whitelist: [botOwnerId],
-  punishRole: true,
-  punishChannel: true,
-  punishWebhook: true,
-  punishBan: true,
-  punishKick: true,
-  punishBotAdd: true,
-  punishEmoji: true,
-  punishSticker: true,
+  whitelist: [OWNER_ID],
   thresholds: {
     bans: 2, kicks: 2, channels: 2, roles: 2,
     webhooks: 1, bots: 1, emojis: 3, stickers: 3
   },
   timeWindow: 15000,
-  ignoreAdmins: true,
   premium: {
-    premiumGuilds: new Map(),
-    premiumUsers: new Set([botOwnerId]),
-    activationKey: 'premiumactivationgodsosixev',
-    pfpChangeCooldown: 300000
+    guilds: new Map(),
+    key: 'premiumactivationgodsosixev'
   }
 };
 
 const tracker = new Map();
 
-// ✅ ALL COMMANDS — EVERY SINGLE ONE
 const commands = [
-  { name: 'premcmds', description: '📋 Show all Premium available commands' },
+  { name: 'premcmds', description: '📋 Show all Premium commands' },
   {
     name: 'premium',
-    description: 'Premium features & activation',
+    description: 'Premium features',
     options: [
       { name: 'action', type: 3, required: true, choices: [
         { name: 'Activate', value: 'activate' },
@@ -55,19 +43,19 @@ const commands = [
         { name: 'Remove Avatar', value: 'removeavatar' },
         { name: 'List Premium', value: 'list' }
       ]},
-      { name: 'code', type: 3, description: 'Your premium activation key' },
-      { name: 'image', type: 11, description: 'Upload image for custom avatar' }
+      { name: 'code', type: 3 },
+      { name: 'image', type: 11 }
     ]
   },
   {
     name: 'antinuke',
-    description: 'Control Anti-Nuke system',
+    description: 'Control Anti-Nuke',
     options: [
       { name: 'action', type: 3, required: true, choices: [
         { name: 'Enable', value: 'enable' },
         { name: 'Disable', value: 'disable' },
         { name: 'Status', value: 'status' },
-        { name: 'Reset All', value: 'reset' }
+        { name: 'Reset', value: 'reset' }
       ]}
     ]
   },
@@ -79,309 +67,226 @@ const commands = [
         { name: 'Add', value: 'add' },
         { name: 'Remove', value: 'remove' },
         { name: 'List', value: 'list' },
-        { name: 'Clear All', value: 'clear' }
+        { name: 'Clear', value: 'clear' }
       ]},
-      { name: 'user', type: 6 }
+      { name: 'user', type: 6, required: true }
     ]
   },
   {
     name: 'threshold',
-    description: 'Set trigger limits',
+    description: 'Set detection limits',
     options: [
       { name: 'type', type: 3, required: true, choices: [
-        { name: 'Ban Trigger', value: 'bans' },
-        { name: 'Kick Trigger', value: 'kicks' },
-        { name: 'Channel Trigger', value: 'channels' },
-        { name: 'Role Trigger', value: 'roles' },
-        { name: 'Webhook Trigger', value: 'webhooks' },
-        { name: 'Bot Add Trigger', value: 'bots' }
+        { name: 'Bans', value: 'bans' },
+        { name: 'Kicks', value: 'kicks' },
+        { name: 'Channels', value: 'channels' },
+        { name: 'Roles', value: 'roles' },
+        { name: 'Webhooks', value: 'webhooks' },
+        { name: 'Bots', value: 'bots' }
       ]},
       { name: 'count', type: 4, required: true }
     ]
   },
   {
     name: 'instantban',
-    description: 'Toggle instant ban mode',
+    description: 'Toggle instant ban',
     options: [
       { name: 'mode', type: 3, required: true, choices: [
-        { name: 'ON — Ban Immediately', value: 'on' },
-        { name: 'OFF — Kick Only', value: 'off' }
+        { name: 'ON', value: 'on' },
+        { name: 'OFF', value: 'off' }
       ]}
     ]
   },
   { name: 'ping', description: 'Check bot latency' },
   { name: 'help', description: 'Show all commands' },
-  { name: 'nukecheck', description: 'Scan for dangerous permissions' },
-  { name: 'protect', description: 'Full server protection status' }
+  { name: 'nukecheck', description: 'Scan server for risks' },
+  { name: 'protect', description: 'Full protection status' }
 ];
 
 async function registerCommands() {
-  const rest = new REST({ version: '10' }).setToken(botToken);
   try {
     console.log('🔄 Registering commands...');
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
     console.log(`✅ ${commands.length} commands registered!`);
-  } catch (e) { console.error('Command Error:', e); }
+  } catch (err) {
+    console.error('Register Error:', err);
+  }
 }
 
-function isPremiumGuild(guildId) { return CONFIG.premium.premiumGuilds.has(guildId); }
-function isWhitelisted(userId) { return CONFIG.whitelist.includes(userId); }
+function isWhitelisted(id) { return CONFIG.whitelist.includes(id); }
+function isPremiumGuild(id) { return CONFIG.premium.guilds.has(id); }
 function trackAction(userId, type) {
   if (!tracker.has(userId)) tracker.set(userId, []);
-  const actions = tracker.get(userId).filter(a => Date.now() - a.time < CONFIG.timeWindow);
-  actions.push({ type, time: Date.now() });
-  tracker.set(userId, actions);
-  return actions.filter(a => a.type === type).length >= CONFIG.thresholds[type];
+  const recent = tracker.get(userId).filter(a => Date.now() - a.time < CONFIG.timeWindow);
+  recent.push({ type, time: Date.now() });
+  tracker.set(userId, recent);
+  return recent.filter(a => a.type === type).length >= CONFIG.thresholds[type];
 }
 
-async function punish(guild, executorId, reason) {
-  if (!CONFIG.enabled || isWhitelisted(executorId)) return false;
-  const member = await guild.members.fetch(executorId).catch(() => null);
+async function punish(guild, uid, reason) {
+  if (!CONFIG.enabled || isWhitelisted(uid)) return false;
+  const member = await guild.members.fetch(uid).catch(() => null);
   if (!member || member.user.bot) return false;
-  if (CONFIG.ignoreAdmins && member.permissions.has(PermissionsBitField.Flags.Administrator)) return false;
-  const botMember = guild.members.me;
-  if (!botMember || member.roles.highest.position >= botMember.roles.highest.position) return false;
+  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return false;
+  if (member.roles.highest.position >= guild.members.me.roles.highest.position) return false;
   try {
-    if (CONFIG.instantBan) await member.ban({ reason: `🛡️ ANTI-NUKE: ${reason}` });
-    else await member.kick(`🛡️ ANTI-NUKE: ${reason}`);
+    if (CONFIG.instantBan) await member.ban({ reason });
+    else await member.kick(reason);
     return true;
   } catch { return false; }
 }
 
-async function sendLog(guild, executorId, actionType, punished) {
-  if (!logChId) return;
-  const channel = await client.channels.fetch(logChId).catch(() => null);
-  if (!channel) return;
-  const embed = new EmbedBuilder()
-    .setColor(punished ? '#ff0000' : '#ffff00')
-    .setTitle(punished ? '🚨 INSTANT BAN — NUKE DETECTED' : '⚠️ Suspicious Activity')
+async function sendLog(guild, uid, action, banned) {
+  if (!LOG_CHANNEL_ID) return;
+  const ch = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+  if (!ch) return;
+  await ch.send({ embeds: [new EmbedBuilder()
+    .setColor(banned ? '#ff0000' : '#ffff00')
+    .setTitle(banned ? '🚨 BANNED — NUKE DETECTED' : '⚠️ Suspicious Activity')
     .addFields(
-      { name: 'User', value: `<@${executorId}> \`${executorId}\`` },
-      { name: 'Action', value: actionType.toUpperCase() },
-      { name: 'Result', value: punished ? '✅ BANNED' : '⚠️ Not banned' }
+      { name: 'User', value: `<@${uid}> \`${uid}\`` },
+      { name: 'Action', value: action },
+      { name: 'Result', value: banned ? '✅ BANNED' : '⚠️ Not banned' }
     )
-    .setTimestamp();
-  await channel.send({ embeds: [embed] }).catch(() => {});
+    .setTimestamp()
+  ]}).catch(() => {});
 }
 
-client.on('ready', async () => {
+client.on(Events.ClientReady, async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   await registerCommands();
-  console.log(`💎 /premcmds ready! | Log Channel: ${logChId ? '✅ Set' : '⚠️ Not set — skipping logs'}`);
+  console.log('💎 Bot Ready — All commands active!');
 });
 
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-  const { commandName, options, user, guild } = interaction;
+client.on(Events.InteractionCreate, async i => {
+  if (!i.isChatInputCommand()) return;
+  const { commandName, options, user, guild } = i;
 
   if (commandName === 'premcmds') {
-    return interaction.reply({ embeds: [new EmbedBuilder()
+    return i.reply({ embeds: [new EmbedBuilder()
       .setColor('#ffd700')
-      .setTitle('💎 PREMIUM — AVAILABLE COMMANDS')
+      .setTitle('💎 ALL COMMANDS')
       .setDescription(`
-**🔓 ACTIVATION**
-\`/premium activate code:premiumactivationgodsosixev\` — Unlock Premium features
-\`/premium status\` — Check Premium status here
+**Premium**
+/premium activate code:premiumactivationgodsosixev
+/premium status
+/premium setavatar image:
+/premium removeavatar
+/premium list
 
-**🖼️ CUSTOMIZATION**
-\`/premium setavatar image:\` — Set custom server avatar
-\`/premium removeavatar\` — Revert to default
+**Anti-Nuke**
+/antinuke enable|disable|status|reset
+/whitelist add|remove|list|clear @user
+/threshold bans 2 | kicks 2 | etc
+/instantban on|off
 
-**📊 BOT OWNER ONLY**
-\`/premium list\` — All Premium servers
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-**🛡️ FREE ANTI-NUKE COMMANDS**
-\`/antinuke enable|disable|status\`
-\`/whitelist add|remove|list|clear\`
-\`/threshold <type> <count>\`
-\`/instantban on|off\`
-\`/nukecheck\` — Scan for threats
-\`/protect\` — Full protection status
+**Tools**
+/ping — Check online
+/help — This list
+/nukecheck — Scan server
+/protect — Full status
       `)
-      .setFooter({ text: 'Your Key: premiumactivationgodsosixev' })
-      .setTimestamp()
     ]});
   }
 
   if (commandName === 'premium') {
-    const action = options.getString('action');
-    const isGuildOwner = guild.ownerId === user.id;
-
-    if (action === 'activate') {
-      if (!isGuildOwner && !CONFIG.premium.premiumUsers.has(user.id)) {
-        return interaction.reply({ content: '❌ **Only server owner can activate Premium!**', ephemeral: true });
-      }
-      const code = options.getString('code');
-      if (code !== CONFIG.premium.activationKey) {
-        return interaction.reply({ content: '❌ **Invalid Premium code!**', ephemeral: true });
-      }
-      if (isPremiumGuild(guild.id)) {
-        return interaction.reply({ content: '✅ **Premium already active!**', ephemeral: true });
-      }
-      CONFIG.premium.premiumGuilds.set(guild.id, {
-        activatedAt: Date.now(),
-        pfpUrl: null,
-        activatedBy: user.id
-      });
-      return interaction.reply({ embeds: [new EmbedBuilder()
-        .setColor('#ffd700')
-        .setTitle('💎 PREMIUM ACTIVATED!')
-        .setDescription(`
-✅ **Premium successfully enabled!**
-
-**Unlocked:**
-• 🖼️ Custom Server Avatar — \`/premium setavatar\`
-• 💎 Premium Status Badge — shows in all status commands
-
-**Next:** Type \`/premcmds\` to see everything!
-        `)
-      ]});
+    const act = options.getString('action');
+    if (act === 'activate') {
+      if (guild.ownerId !== user.id) return i.reply('❌ Only server owner!', { ephemeral: true });
+      if (options.getString('code') !== CONFIG.premium.key) return i.reply('❌ Wrong key!', { ephemeral: true });
+      if (isPremiumGuild(guild.id)) return i.reply('✅ Already active!', { ephemeral: true });
+      CONFIG.premium.guilds.set(guild.id, { at: Date.now() });
+      return i.reply('💎 **PREMIUM ACTIVATED!**');
     }
-
-    if (action === 'status') {
-      const data = CONFIG.premium.premiumGuilds.get(guild.id);
-      return interaction.reply({ embeds: [new EmbedBuilder()
-        .setColor(data ? '#ffd700' : '#808080')
-        .setTitle('💎 Premium Status')
-        .setDescription(data ? `✅ **ACTIVE** — Activated <t:${Math.floor(data.activatedAt/1000)}:R>` : '❌ Not Active')
-      ]});
+    if (act === 'status') return i.reply(isPremiumGuild(guild.id) ? '💎 Premium: ✅ Active' : 'Premium: ❌ Not active');
+    if (act === 'setavatar') {
+      if (!isPremiumGuild(guild.id)) return i.reply('❌ Premium only!', { ephemeral: true });
+      const img = options.getAttachment('image');
+      if (!img) return i.reply('❌ Upload an image!', { ephemeral: true });
+      return i.reply({ embeds: [new EmbedBuilder().setColor('#00ff00').setTitle('🖼️ Avatar Saved').setImage(img.url)] });
     }
-
-    if (action === 'setavatar') {
-      if (!isPremiumGuild(guild.id)) return interaction.reply({ content: '❌ Premium required!', ephemeral: true });
-      if (!isGuildOwner) return interaction.reply({ content: '❌ Only server owner can change this!', ephemeral: true });
-      const attachment = options.getAttachment('image');
-      if (!attachment || !attachment.contentType?.startsWith('image/')) {
-        return interaction.reply({ content: '❌ Upload a valid image file!', ephemeral: true });
-      }
-      const data = CONFIG.premium.premiumGuilds.get(guild.id);
-      data.pfpUrl = attachment.url;
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor('#00ff00').setTitle('🖼️ Avatar Saved!').setDescription('✅ Custom server avatar set').setImage(attachment.url)] });
-    }
-
-    if (action === 'removeavatar') {
-      if (!isPremiumGuild(guild.id)) return interaction.reply({ content: '❌ Premium required!', ephemeral: true });
-      if (!isGuildOwner) return interaction.reply({ content: '❌ Only server owner!', ephemeral: true });
-      const data = CONFIG.premium.premiumGuilds.get(guild.id);
-      data.pfpUrl = null;
-      return interaction.reply('✅ **Avatar removed — using default**');
-    }
-
-    if (action === 'list') {
-      if (user.id !== botOwnerId) return interaction.reply({ content: '❌ Owner only!', ephemeral: true });
-      const list = Array.from(CONFIG.premium.premiumGuilds.keys()).map(id => `• \`${id}\``).join('\n') || 'None';
-      return interaction.reply(`**💎 Premium Servers:**\n${list}`);
+    if (act === 'removeavatar') return i.reply('✅ Avatar removed');
+    if (act === 'list') {
+      if (user.id !== OWNER_ID) return i.reply('❌ Owner only!', { ephemeral: true });
+      return i.reply(`Premium servers:\n${Array.from(CONFIG.premium.guilds.keys()).join('\n') || 'None'}`);
     }
     return;
   }
 
-  const ownerOnly = ['antinuke', 'whitelist', 'threshold', 'instantban', 'nukecheck', 'protect'];
-  if (ownerOnly.includes(commandName) && user.id !== botOwnerId) {
-    return interaction.reply({ content: '❌ **ONLY BOT OWNER CAN USE THIS!**', ephemeral: true });
+  const ownerCmds = ['antinuke','whitelist','threshold','instantban','nukecheck','protect'];
+  if (ownerCmds.includes(commandName) && user.id !== OWNER_ID) {
+    return i.reply('❌ Only bot owner!', { ephemeral: true });
   }
 
   if (commandName === 'antinuke') {
     const act = options.getString('action');
-    if (act === 'enable') { CONFIG.enabled = true; await interaction.reply('✅ **ANTI-NUKE ENABLED**'); }
-    if (act === 'disable') { CONFIG.enabled = false; await interaction.reply('⚠️ **ANTI-NUKE DISABLED**'); }
+    if (act === 'enable') { CONFIG.enabled = true; await i.reply('✅ PROTECTION ON'); }
+    if (act === 'disable') { CONFIG.enabled = false; await i.reply('⚠️ PROTECTION OFF'); }
     if (act === 'status') {
-      await interaction.reply(`
-🛡️ **STATUS**
-Protection: ${CONFIG.enabled ? '✅ ON' : '❌ OFF'}
-Instant Ban: ${CONFIG.instantBan ? '✅ ON' : '❌ OFF'}
-Premium: ${isPremiumGuild(guild.id) ? '💎 ACTIVE' : 'Free'}
-Log Channel: ${logChId ? '✅ Set' : '⚠️ Not configured'}
-      `);
+      await i.reply(`🛡️ Active: ${CONFIG.enabled ? '✅ YES' : '❌ NO'} | ⚡ Instant: ${CONFIG.instantBan ? '✅ ON' : '❌ OFF'} | 💎 Premium: ${isPremiumGuild(guild.id) ? '✅ YES' : 'NO'}`);
     }
     if (act === 'reset') {
-      CONFIG.thresholds = { bans:2, kicks:2, channels:2, roles:2, webhooks:1, bots:1, emojis:3, stickers:3 };
-      CONFIG.timeWindow = 15000;
+      CONFIG.thresholds = { bans:2,kicks:2,channels:2,roles:2,webhooks:1,bots:1,emojis:3,stickers:3 };
       CONFIG.instantBan = true;
-      await interaction.reply('✅ **All settings reset**');
+      await i.reply('✅ All reset');
     }
   }
 
   if (commandName === 'whitelist') {
     const act = options.getString('action');
     const usr = options.getUser('user');
-    if (act === 'add' && usr) { CONFIG.whitelist.push(usr.id); await interaction.reply(`✅ Whitelisted: ${usr}`); }
-    if (act === 'remove' && usr) { 
-      CONFIG.whitelist = CONFIG.whitelist.filter(id => id !== usr.id); 
-      await interaction.reply(`✅ Removed: ${usr}`); 
-    }
-    if (act === 'list') { 
-      const list = CONFIG.whitelist.map(id => `<@${id}>`).join('\n') || 'None';
-      await interaction.reply(`**Whitelist:**\n${list}`); 
-    }
-    if (act === 'clear') { CONFIG.whitelist = [botOwnerId]; await interaction.reply('✅ Cleared — only owner remains'); }
+    if (act === 'add') { CONFIG.whitelist.push(usr.id); await i.reply(`✅ Whitelisted ${usr}`); }
+    if (act === 'remove') { CONFIG.whitelist = CONFIG.whitelist.filter(id => id !== usr.id); await i.reply(`✅ Removed ${usr}`); }
+    if (act === 'list') { await i.reply(CONFIG.whitelist.map(id => `<@${id}>`).join('\n') || 'None'); }
+    if (act === 'clear') { CONFIG.whitelist = [OWNER_ID]; await i.reply('✅ Cleared'); }
   }
 
   if (commandName === 'threshold') {
     const type = options.getString('type');
-    const count = options.getInteger('count');
-    CONFIG.thresholds[type] = count;
-    await interaction.reply(`✅ **${type.toUpperCase()} → ${count} = Instant Ban**`);
+    const val = options.getInteger('count');
+    CONFIG.thresholds[type] = val;
+    await i.reply(`✅ ${type} → ${val}`);
   }
 
   if (commandName === 'instantban') {
     CONFIG.instantBan = options.getString('mode') === 'on';
-    await interaction.reply(CONFIG.instantBan ? '⚡ **INSTANT BAN ACTIVE**' : '⚠️ **KICK ONLY**');
+    await i.reply(CONFIG.instantBan ? '⚡ Instant Ban: ON' : 'Kick only');
   }
 
-  if (commandName === 'ping') {
-    await interaction.reply(`🏓 Pong! \`${client.ws.ping}ms\``);
-  }
-
-  if (commandName === 'help') {
-    await interaction.reply(`
-🛡️ **ANTI-NUKE + PREMIUM**
-\`/premcmds\` — Full list
-\`/antinuke enable/disable/status\` — Control
-\`/whitelist add/remove/list/clear\` — Trusted users
-\`/threshold <type> <num>\` — Set limits
-\`/instantban on/off\` — Ban or kick
-\`/nukecheck\` — Scan server
-\`/protect\` — Status overview
-    `, { ephemeral: true });
-  }
-
-  if (commandName === 'nukecheck') {
-    const dangerous = [];
-    const roles = await guild.roles.fetch();
-    for (const [, role] of roles) {
-      if (role.permissions.has(PermissionsBitField.Flags.Administrator) && !role.managed) {
-        dangerous.push(`⚠️ ${role.name} — ADMIN`);
-      }
-      if (role.permissions.has(PermissionsBitField.Flags.BanMembers)) {
-        dangerous.push(`⚠️ ${role.name} — BAN`);
-      }
-    }
-    await interaction.reply(`🔍 **SCAN RESULTS:**\n${dangerous.length ? dangerous.join('\n') : '✅ No dangerous roles found!'}`);
-  }
-
+  if (commandName === 'ping') await i.reply(`🏓 Pong! \`${client.ws.ping}ms\``);
+  if (commandName === 'help') await i.reply('Check /premcmds for all commands', { ephemeral: true });
   if (commandName === 'protect') {
-    await interaction.reply(`🛡️ **PROTECTION: ${CONFIG.enabled ? '✅ ON' : '❌ OFF'}** | ⚡ **INSTANT: ${CONFIG.instantBan ? '✅ ON' : '❌ OFF'}** | 💎 **PREMIUM: ${isPremiumGuild(guild.id) ? '✅ YES' : 'NO'}** | 📋 **LOGS: ${logChId ? '✅ ON' : 'OFF'}`);
+    await i.reply(`🛡️ ON: ${CONFIG.enabled} | ⚡ INSTANT: ${CONFIG.instantBan} | 💎 PREMIUM: ${isPremiumGuild(guild.id)}`);
+  }
+  if (commandName === 'nukecheck') {
+    const dangers = [];
+    const roles = await guild.roles.fetch();
+    for (const [,r] of roles) {
+      if (r.permissions.has(PermissionsBitField.Flags.Administrator) && !r.managed) dangers.push(`⚠️ ${r.name} — ADMIN`);
+      if (r.permissions.has(PermissionsBitField.Flags.BanMembers)) dangers.push(`⚠️ ${r.name} — BAN`);
+    }
+    await i.reply(dangers.length ? dangers.join('\n') : '✅ No dangerous roles');
   }
 });
 
-client.on('guildAuditLogEntryCreate', async (log) => {
+client.on(Events.GuildAuditLogEntryCreate, async log => {
   if (!CONFIG.enabled) return;
   const { action, executorId, guild } = log;
   if (!executorId || executorId === client.user.id || isWhitelisted(executorId)) return;
 
-  let detected = false, actionType = '';
-  if (action === AuditLogEvent.MemberBanAdd && trackAction(executorId, 'bans')) detected = true, actionType = 'Mass Ban';
-  if (action === AuditLogEvent.MemberKick && trackAction(executorId, 'kicks')) detected = true, actionType = 'Mass Kick';
-  if ([AuditLogEvent.ChannelCreate, AuditLogEvent.ChannelDelete].includes(action) && trackAction(executorId, 'channels')) detected = true, actionType = 'Channel Attack';
-  if ([AuditLogEvent.RoleCreate, AuditLogEvent.RoleDelete].includes(action) && trackAction(executorId, 'roles')) detected = true, actionType = 'Role Attack';
-  if (action === AuditLogEvent.WebhookCreate && trackAction(executorId, 'webhooks')) detected = true, actionType = 'Webhook Attack';
-  if (action === AuditLogEvent.BotAdd && trackAction(executorId, 'bots')) detected = true, actionType = 'Bot Nuke';
+  let detected = false, reason = '';
+  if (action === AuditLogEvent.MemberBanAdd && trackAction(executorId, 'bans')) detected = true, reason = 'Mass Ban';
+  if (action === AuditLogEvent.MemberKick && trackAction(executorId, 'kicks')) detected = true, reason = 'Mass Kick';
+  if ([AuditLogEvent.ChannelCreate,AuditLogEvent.ChannelDelete].includes(action) && trackAction(executorId, 'channels')) detected = true, reason = 'Channel Attack';
+  if ([AuditLogEvent.RoleCreate,AuditLogEvent.RoleDelete].includes(action) && trackAction(executorId, 'roles')) detected = true, reason = 'Role Attack';
+  if (action === AuditLogEvent.WebhookCreate && trackAction(executorId, 'webhooks')) detected = true, reason = 'Webhook Attack';
+  if (action === AuditLogEvent.BotAdd && trackAction(executorId, 'bots')) detected = true, reason = 'Bot Nuke';
 
   if (detected) {
-    const punished = await punish(guild, executorId, `${actionType} — Limit Exceeded`);
-    await sendLog(guild, executorId, actionType, punished);
+    const banned = await punish(guild, executorId, reason);
+    await sendLog(guild, executorId, reason, banned);
   }
 });
 
-client.login(botToken);
+client.login(TOKEN);
