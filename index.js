@@ -1,3 +1,8 @@
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Antinuke Bot Running 🛡️'));
+app.listen(PORT, () => console.log(`✅ Port ${PORT} open — Ready!`));
 const { Client, Events, GatewayIntentBits, AuditLogEvent, EmbedBuilder, REST, Routes, PermissionsBitField } = require('discord.js');
 
 // === ENVIRONMENT VARIABLES — ONLY READ HERE ===
