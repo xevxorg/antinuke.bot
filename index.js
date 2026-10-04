@@ -97,12 +97,12 @@ const commands = [
     description: 'Set trigger limits',
     options: [
       { name: 'type', type: 3, required: true, choices: [
-        { name: 'Ban Trigger', value: 'bans' },
-        { name: 'Kick Trigger', value: 'kicks' },
-        { name: 'Channel Trigger', value: 'channels' },
-        { name: 'Role Trigger', value: 'roles' },
-        { name: 'Webhook Trigger', value: 'webhooks' },
-        { name: 'Bot Add Trigger', value: 'bots' }
+        { name: 'Bans', value: 'bans' },
+        { name: 'Kicks', value: 'kicks' },
+        { name: 'Channels', value: 'channels' },
+        { name: 'Roles', value: 'roles' },
+        { name: 'Webhooks', value: 'webhooks' },
+        { name: 'Bots', value: 'bots' }
       ]},
       { name: 'count', type: 4, required: true }
     ]
@@ -112,8 +112,8 @@ const commands = [
     description: 'Toggle instant ban mode',
     options: [
       { name: 'mode', type: 3, required: true, choices: [
-        { name: 'ON — Ban Immediately', value: 'on' },
-        { name: 'OFF — Kick Only', value: 'off' }
+        { name: 'ON', value: 'on' },
+        { name: 'OFF', value: 'off' }
       ]}
     ]
   },
@@ -147,20 +147,21 @@ async function punish(guild, executorId, reason) {
   const member = await guild.members.fetch(executorId).catch(() => null);
   if (!member || member.user.bot) return false;
   if (CONFIG.ignoreAdmins && member.permissions.has(PermissionsBitField.Flags.Administrator)) return false;
-  if (member.roles.highest.position >= guild.members.me.roles.highest.position) return false;
+  const botMember = guild.members.me;
+  if (!botMember || member.roles.highest.position >= botMember.roles.highest.position) return false;
   try {
-    if (CONFIG.instantBan) await member.ban({ reason: `🛡️ ANTI-NUKE: ${reason}` });
-    else await member.kick(`🛡️ ANTI-NUKE: ${reason}`);
+    if (CONFIG.instantBan) await member.ban({ reason: `Anti-Nuke: ${reason}` });
+    else await member.kick(`Anti-Nuke: ${reason}`);
     return true;
   } catch { return false; }
 }
 
 async function sendLog(guild, executorId, actionType, punished) {
   if (!logChId) return;
-  const channel = await client.channels.fetch(logChId).catch(() => null);
+  const channel = await guild.channels.fetch(logChId).catch(() => null);
   if (!channel) return;
   const embed = new EmbedBuilder()
-    .setColor(punished ? 'Red' : 'Yellow')
+    .setColor(punished ? '#ff0000' : '#ffff00')
     .setTitle(punished ? '🚨 INSTANT BAN — NUKE DETECTED' : '⚠️ Suspicious Activity')
     .addFields(
       { name: 'User', value: `<@${executorId}> \`${executorId}\`` },
@@ -183,7 +184,7 @@ client.on('interactionCreate', async interaction => {
 
   if (commandName === 'premcmds') {
     return interaction.reply({ embeds: [new EmbedBuilder()
-      .setColor('Gold')
+      .setColor('#ffd700')
       .setTitle('💎 PREMIUM — AVAILABLE COMMANDS')
       .setDescription(`
 **🔓 ACTIVATION**
@@ -197,14 +198,17 @@ client.on('interactionCreate', async interaction => {
 **📊 BOT OWNER ONLY**
 \`/premium list\` — All Premium servers
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 **🛡️ FREE ANTI-NUKE COMMANDS**
-\`/antinuke enable|disable|status\`
-\`/whitelist add|remove|list|clear\`
-\`/threshold <type> <count>\`
-\`/instantban on|off\`
-\`/nukecheck\` — Scan for threats
-\`/protect\` — Full protection status
+\`/antinuke enable\` — Turn protection ON
+\`/antinuke disable\` — Turn protection OFF
+\`/antinuke status\` — Check status
+\`/whitelist add @user\` — Add trusted user
+\`/whitelist remove @user\` — Remove trusted user
+\`/threshold bans 2\` — Set limit
+\`/instantban on\` — Ban instantly
+\`/nukecheck\` — Scan server
+\`/protect\` — Protection overview
       `)
       .setFooter({ text: 'Your Key: premiumactivationgodsosixev' })
       .setTimestamp()
@@ -213,10 +217,10 @@ client.on('interactionCreate', async interaction => {
 
   if (commandName === 'premium') {
     const action = options.getString('action');
-    const isGuildOwner = guild.ownerId === user.id;
+    const isOwner = guild.ownerId === user.id;
 
     if (action === 'activate') {
-      if (!isGuildOwner && !CONFIG.premium.premiumUsers.has(user.id)) {
+      if (!isOwner) {
         return interaction.reply({ content: '❌ **Only server owner can activate Premium!**', ephemeral: true });
       }
       const code = options.getString('code');
@@ -228,11 +232,11 @@ client.on('interactionCreate', async interaction => {
       }
       CONFIG.premium.premiumGuilds.set(guild.id, {
         activatedAt: Date.now(),
-        pfpUrl: null,
+        avatarUrl: null,
         activatedBy: user.id
       });
       return interaction.reply({ embeds: [new EmbedBuilder()
-        .setColor('Gold')
+        .setColor('#ffd700')
         .setTitle('💎 PREMIUM ACTIVATED!')
         .setDescription(`
 ✅ **Premium successfully enabled!**
@@ -249,7 +253,7 @@ client.on('interactionCreate', async interaction => {
     if (action === 'status') {
       const data = CONFIG.premium.premiumGuilds.get(guild.id);
       return interaction.reply({ embeds: [new EmbedBuilder()
-        .setColor(data ? 'Gold' : 'Gray')
+        .setColor(data ? '#ffd700' : '#808080')
         .setTitle('💎 Premium Status')
         .setDescription(data ? `✅ **ACTIVE** — Activated <t:${Math.floor(data.activatedAt/1000)}:R>` : '❌ Not Active')
       ]});
@@ -257,21 +261,19 @@ client.on('interactionCreate', async interaction => {
 
     if (action === 'setavatar') {
       if (!isPremiumGuild(guild.id)) return interaction.reply({ content: '❌ Premium required!', ephemeral: true });
-      if (!isGuildOwner) return interaction.reply({ content: '❌ Only server owner can change this!', ephemeral: true });
+      if (!isOwner) return interaction.reply({ content: '❌ Only server owner!', ephemeral: true });
       const attachment = options.getAttachment('image');
       if (!attachment || !attachment.contentType?.startsWith('image/')) {
         return interaction.reply({ content: '❌ Upload a valid image file!', ephemeral: true });
       }
-      const data = CONFIG.premium.premiumGuilds.get(guild.id);
-      data.pfpUrl = attachment.url;
-      return interaction.reply({ embeds: [new EmbedBuilder().setColor('Green').setTitle('🖼️ Avatar Saved!').setDescription('✅ Custom server avatar set').setImage(attachment.url)] });
+      CONFIG.premium.premiumGuilds.get(guild.id).avatarUrl = attachment.url;
+      return interaction.reply({ embeds: [new EmbedBuilder().setColor('#00ff00').setTitle('🖼️ Avatar Saved!').setDescription('✅ Custom server avatar set').setImage(attachment.url)] });
     }
 
     if (action === 'removeavatar') {
       if (!isPremiumGuild(guild.id)) return interaction.reply({ content: '❌ Premium required!', ephemeral: true });
-      if (!isGuildOwner) return interaction.reply({ content: '❌ Only server owner!', ephemeral: true });
-      const data = CONFIG.premium.premiumGuilds.get(guild.id);
-      data.pfpUrl = null;
+      if (!isOwner) return interaction.reply({ content: '❌ Only server owner!', ephemeral: true });
+      CONFIG.premium.premiumGuilds.get(guild.id).avatarUrl = null;
       return interaction.reply('✅ **Avatar removed — using default**');
     }
 
@@ -313,8 +315,14 @@ Log Channel: ${logChId ? '✅ Set' : '⚠️ Not configured'}
     const act = options.getString('action');
     const usr = options.getUser('user');
     if (act === 'add' && usr) { CONFIG.whitelist.push(usr.id); await interaction.reply(`✅ Whitelisted: ${usr}`); }
-    if (act === 'remove' && usr) { CONFIG.whitelist = CONFIG.whitelist.filter(id => id !== usr.id); await interaction.reply(`✅ Removed: ${usr}`); }
-    if (act === 'list') { const list = CONFIG.whitelist.map(id => `<@${id}>`).join('\n'); await interaction.reply(`**Whitelist:**\n${list || 'None'}`); }
+    if (act === 'remove' && usr) { 
+      CONFIG.whitelist = CONFIG.whitelist.filter(id => id !== usr.id); 
+      await interaction.reply(`✅ Removed: ${usr}`); 
+    }
+    if (act === 'list') { 
+      const list = CONFIG.whitelist.map(id => `<@${id}>`).join('\n') || 'None';
+      await interaction.reply(`**Whitelist:**\n${list}`); 
+    }
     if (act === 'clear') { CONFIG.whitelist = [botOwnerId]; await interaction.reply('✅ Cleared — only owner remains'); }
   }
 
@@ -337,12 +345,13 @@ Log Channel: ${logChId ? '✅ Set' : '⚠️ Not configured'}
   if (commandName === 'help') {
     await interaction.reply(`
 🛡️ **ANTI-NUKE + PREMIUM**
-\`/premcmds\` — Full Premium Commands
-\`/antinuke enable|disable|status\`
-\`/whitelist add|remove|list\`
-\`/threshold <type> <count>\`
-\`/instantban on|off\`
-\`/nukecheck\` — Scan for threats
+\`/premcmds\` — Full list
+\`/antinuke enable/disable/status\` — Control
+\`/whitelist add/remove/list/clear\` — Trusted users
+\`/threshold <type> <num>\` — Set limits
+\`/instantban on/off\` — Ban or kick
+\`/nukecheck\` — Scan server
+\`/protect\` — Status overview
     `, { ephemeral: true });
   }
 
@@ -350,35 +359,64 @@ Log Channel: ${logChId ? '✅ Set' : '⚠️ Not configured'}
     const dangerous = [];
     const roles = await guild.roles.fetch();
     for (const [, role] of roles) {
-      if (role.permissions.has(PermissionsBitField.Flags.Administrator) && !role.managed) dangerous.push(`⚠️ ${role.name} — ADMIN`);
-      if (role.permissions.has(PermissionsBitField.Flags.BanMembers)) dangerous.push(`⚠️ ${role.name} — Ban Members`);
+      if (role.permissions.has(PermissionsBitField.Flags.Administrator) && !role.managed) {
+        dangerous.push(`⚠️ ${role.name} — ADMIN`);
+      }
+      if (role.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+        dangerous.push(`⚠️ ${role.name} — BAN`);
+      }
     }
-    await interaction.reply(`🔍 **SCAN RESULTS:**\n${dangerous.length ? dangerous.join('\n') : '✅ No dangerous roles!'}`);
+    await interaction.reply(`🔍 **SCAN RESULTS:**\n${dangerous.length ? dangerous.join('\n') : '✅ No dangerous roles found!'}`);
   }
 
   if (commandName === 'protect') {
-    await interaction.reply(`🛡️ **PROTECTION: ${CONFIG.enabled ? '✅ ON' : '❌ OFF'}** | ⚡ **INSTANT BAN: ${CONFIG.instantBan ? '✅ ON' : '❌ OFF'}** | 💎 **PREMIUM: ${isPremiumGuild(guild.id) ? '✅ ACTIVE' : 'Free'}** | 📋 **LOGS: ${logChId ? '✅ ON' : '⚠️ OFF'}**`);
+    await interaction.reply(`🛡️ **PROTECTION: ${CONFIG.enabled ? '✅ ON' : '❌ OFF'}** | ⚡ **INSTANT: ${CONFIG.instantBan ? '✅ ON' : '❌ OFF'}** | 💎 **PREMIUM: ${isPremiumGuild(guild.id) ? '✅ YES' : 'NO'}** | 📋 **LOGS: ${logChId ? '✅ ON' : 'OFF'}`);
   }
 });
 
-client.on('guildAuditLogEntryCreate', async entry => {
+// === ANTI-NUKE DETECTION ===
+client.on('guildAuditLogEntryCreate', async (log) => {
   if (!CONFIG.enabled) return;
-  const { action, executorId, guild } = entry;
+  const { actionType, executorId, guild } = log;
   if (!executorId || executorId === client.user.id || isWhitelisted(executorId)) return;
 
-  let detected = false, actionType = '';
-  if (action === AuditLogEvent.MemberBanAdd && trackAction(executorId, 'bans')) detected = true, actionType = 'Mass Ban';
-  if (action === AuditLogEvent.MemberKick && trackAction(executorId, 'kicks')) detected = true, actionType = 'Mass Kick';
-  if ([AuditLogEvent.ChannelCreate, AuditLogEvent.ChannelDelete].includes(action) && trackAction(executorId, 'channels')) detected = true, actionType = 'Channel Attack';
-  if ([AuditLogEvent.RoleCreate, AuditLogEvent.RoleDelete].includes(action) && trackAction(executorId, 'roles')) detected = true, actionType = 'Role Attack';
-  if (action === AuditLogEvent.WebhookCreate && trackAction(executorId, 'webhooks')) detected = true, actionType = 'Webhook Attack';
-  if (action === AuditLogEvent.BotAdd && trackAction(executorId, 'bots')) detected = true, actionType = 'Bot Nuke';
+  let detected = false;
+  let actionName = '';
+
+  switch (actionType) {
+    case AuditLogEvent.MemberBanAdd:
+      detected = trackAction(executorId, 'bans');
+      actionName = 'Mass Ban';
+      break;
+    case AuditLogEvent.MemberKick:
+      detected = trackAction(executorId, 'kicks');
+      actionName = 'Mass Kick';
+      break;
+    case AuditLogEvent.ChannelCreate:
+    case AuditLogEvent.ChannelDelete:
+      detected = trackAction(executorId, 'channels');
+      actionName = 'Channel Attack';
+      break;
+    case AuditLogEvent.RoleCreate:
+    case AuditLogEvent.RoleDelete:
+      detected = trackAction(executorId, 'roles');
+      actionName = 'Role Attack';
+      break;
+    case AuditLogEvent.WebhookCreate:
+    case AuditLogEvent.WebhookDelete:
+      detected = trackAction(executorId, 'webhooks');
+      actionName = 'Webhook Attack';
+      break;
+    case AuditLogEvent.BotAdd:
+      detected = trackAction(executorId, 'bots');
+      actionName = 'Bot Raid';
+      break;
+  }
 
   if (detected) {
-    const punished = await punish(guild, executorId, `${actionType} — Limit Exceeded`);
-    await sendLog(guild, executorId, actionType, punished);
+    const punished = await punish(guild, executorId, `${actionName} — Limit exceeded`);
+    await sendLog(guild, executorId, actionName, punished);
   }
 });
 
-client.login(botToken);
 client.login(botToken);
